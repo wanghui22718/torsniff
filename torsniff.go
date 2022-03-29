@@ -33,19 +33,27 @@ func (t *tfile) String() string {
 }
 
 type torrent struct {
-	infohashHex string
-	name        string
-	length      int64
-	files       []*tfile
+	// infohashHex string
+	name   string
+	length int64
+	files  []*tfile
+	times  int
 }
 
-func (t *torrent) String() string {
+type simsort struct {
+	hex string
+	// times int
+	torrent *torrent
+}
+
+func (t *torrent) String(infohashHex string) string {
 	return fmt.Sprintf(
-		"link: %s\nname: %s\nsize: %d\nfile: %d\n",
-		fmt.Sprintf("magnet:?xt=urn:btih:%s", t.infohashHex),
+		"link: %s\nname: %s\nsize: %d\nfile: %d\ntimes: %d\n",
+		fmt.Sprintf("magnet:?xt=urn:btih:%s", infohashHex),
 		t.name,
 		t.length,
 		len(t.files),
+		t.times,
 	)
 }
 
@@ -55,7 +63,7 @@ func parseTorrent(meta []byte, infohashHex string) (*torrent, error) {
 		return nil, err
 	}
 
-	t := &torrent{infohashHex: infohashHex}
+	t := &torrent{times: 1}
 	if name, ok := dict["name.utf-8"].(string); ok {
 		t.name = name
 	} else if name, ok := dict["name"].(string); ok {
@@ -98,12 +106,12 @@ func parseTorrent(meta []byte, infohashHex string) (*torrent, error) {
 	}
 
 	if t.length == 0 {
-		t.length = totalSize
+		t.length = totalSize / 1000 / 1000
 	}
 	if len(t.files) == 0 {
 		t.files = append(t.files, &tfile{name: t.name, length: t.length})
 	}
-
+	// t.times = 1
 	return t, nil
 }
 
@@ -115,6 +123,8 @@ type torsniff struct {
 	timeout    time.Duration
 	blacklist  *blackList
 	dir        string
+	whrst      map[string]*torrent
+	whct       int
 }
 
 func (t *torsniff) run() error {
@@ -128,12 +138,18 @@ func (t *torsniff) run() error {
 	dht.run()
 
 	log.Println("running, it may take a few minutes...")
+	log.Println("whdebug log on")
 
 	for {
+		// log.Println("whdebug dht.run() for")
+		// cunter there
+		// var whct = 0
 		select {
 		case <-dht.announcements.wait():
 			for {
 				if ac := dht.announcements.get(); ac != nil {
+					// log.Println("whdebug dht.announcements.wait")
+					// whct += 1
 					tokens <- struct{}{}
 					go t.work(ac, tokens)
 					continue
@@ -152,43 +168,47 @@ func (t *torsniff) work(ac *announcement, tokens chan struct{}) {
 		<-tokens
 	}()
 
+	// log.Println("check torrent")
 	if t.isTorrentExist(ac.infohashHex) {
+		t.whrst[ac.infohashHex].times += 1
 		return
+	} else {
+		peerAddr := ac.peer.String()
+		if t.blacklist.has(peerAddr) {
+			return
+		}
+
+		wire := newMetaWire(string(ac.infohash), peerAddr, t.timeout)
+		defer wire.free()
+		meta, err := wire.fetch()
+		if err != nil {
+			t.blacklist.add(peerAddr)
+			return
+		}
+		if err := t.saveTorrent(ac.infohashHex, meta); err != nil {
+			return
+		}
+		torrent, err := parseTorrent(meta, ac.infohashHex)
+		if err != nil {
+			return
+		}
+		t.whrst[ac.infohashHex] = torrent
+		log.Println(torrent)
+
 	}
 
-	peerAddr := ac.peer.String()
-	if t.blacklist.has(peerAddr) {
-		return
-	}
-
-	wire := newMetaWire(string(ac.infohash), peerAddr, t.timeout)
-	defer wire.free()
-
-	meta, err := wire.fetch()
-	if err != nil {
-		t.blacklist.add(peerAddr)
-		return
-	}
-
-	if err := t.saveTorrent(ac.infohashHex, meta); err != nil {
-		return
-	}
-
-	torrent, err := parseTorrent(meta, ac.infohashHex)
-	if err != nil {
-		return
-	}
-
-	log.Println(torrent)
 }
 
 func (t *torsniff) isTorrentExist(infohashHex string) bool {
-	name, _ := t.torrentPath(infohashHex)
-	_, err := os.Stat(name)
-	if os.IsNotExist(err) {
-		return false
+	t.whct += 1
+	_, ok := t.whrst[infohashHex]
+	if ok {
+		log.Println("ok", infohashHex, t.whrst[infohashHex])
+		return true
+	} else {
+		log.Println("not ok", infohashHex)
 	}
-	return err == nil
+	return ok
 }
 
 func (t *torsniff) saveTorrent(infohashHex string, data []byte) error {
@@ -234,6 +254,8 @@ func main() {
 	var dir string
 	var verbose bool
 	var friends int
+	var whrst map[string]*torrent
+	whrst = make(map[string]*torrent)
 
 	home, err := homedir.Dir()
 	userHome := path.Join(home, directory)
@@ -266,15 +288,17 @@ func main() {
 			secret:     string(randBytes(20)),
 			dir:        absDir,
 			blacklist:  newBlackList(5*time.Minute, 50000),
+			whrst:      whrst,
+			whct:       0,
 		}
 		return p.run()
 	}
 
 	root.Flags().StringVarP(&addr, "addr", "a", "", "listen on given address (default all, ipv4 and ipv6)")
 	root.Flags().Uint16VarP(&port, "port", "p", 6881, "listen on given port")
-	root.Flags().IntVarP(&friends, "friends", "f", 500, "max fiends to make with per second")
-	root.Flags().IntVarP(&peers, "peers", "e", 400, "max peers to connect to download torrents")
-	root.Flags().DurationVarP(&timeout, "timeout", "t", 10*time.Second, "max time allowed for downloading torrents")
+	root.Flags().IntVarP(&friends, "friends", "f", 5000, "max fiends to make with per second")
+	root.Flags().IntVarP(&peers, "peers", "e", 4000, "max peers to connect to download torrents")
+	root.Flags().DurationVarP(&timeout, "timeout", "t", 3*time.Second, "max time allowed for downloading torrents")
 	root.Flags().StringVarP(&dir, "dir", "d", userHome, "the directory to store the torrents")
 	root.Flags().BoolVarP(&verbose, "verbose", "v", true, "run in verbose mode")
 
