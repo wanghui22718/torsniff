@@ -29,7 +29,7 @@ type tfile struct {
 }
 
 func (t *tfile) String() string {
-	return fmt.Sprintf("name: %s\n, size: %d\n", t.name, t.length)
+	return fmt.Sprintf("name: %s, size: %d\n", t.name, t.length/1000)
 }
 
 type torrent struct {
@@ -46,14 +46,20 @@ type simsort struct {
 	torrent *torrent
 }
 
-func (t *torrent) String(infohashHex string) string {
+func (t *torrent) String() string {
+
+	finfo := make([]string, 0)
+	for _, tf := range t.files {
+		finfo = append(finfo, tf.String())
+	}
+	finfo = append(finfo)
 	return fmt.Sprintf(
-		"link: %s\nname: %s\nsize: %d\nfile: %d\ntimes: %d\n",
-		fmt.Sprintf("magnet:?xt=urn:btih:%s", infohashHex),
+		"name: %s\nsize: %d\nfile: %d\ntimes: %d\nfilelist:\n %v\n",
 		t.name,
 		t.length,
 		len(t.files),
 		t.times,
+		finfo,
 	)
 }
 
@@ -70,7 +76,7 @@ func parseTorrent(meta []byte, infohashHex string) (*torrent, error) {
 		t.name = name
 	}
 	if length, ok := dict["length"].(int64); ok {
-		t.length = length
+		t.length = length / 1000 / 1000
 	}
 
 	var totalSize int64
@@ -141,15 +147,10 @@ func (t *torsniff) run() error {
 	log.Println("whdebug log on")
 
 	for {
-		// log.Println("whdebug dht.run() for")
-		// cunter there
-		// var whct = 0
 		select {
 		case <-dht.announcements.wait():
 			for {
 				if ac := dht.announcements.get(); ac != nil {
-					// log.Println("whdebug dht.announcements.wait")
-					// whct += 1
 					tokens <- struct{}{}
 					go t.work(ac, tokens)
 					continue
@@ -160,7 +161,6 @@ func (t *torsniff) run() error {
 			return dht.errDie
 		}
 	}
-
 }
 
 func (t *torsniff) work(ac *announcement, tokens chan struct{}) {
@@ -193,6 +193,8 @@ func (t *torsniff) work(ac *announcement, tokens chan struct{}) {
 			return
 		}
 		t.whrst[ac.infohashHex] = torrent
+
+		log.Println(fmt.Sprintf("magnet:?xt=urn:btih:%s", ac.infohashHex))
 		log.Println(torrent)
 
 	}
@@ -203,11 +205,12 @@ func (t *torsniff) isTorrentExist(infohashHex string) bool {
 	t.whct += 1
 	_, ok := t.whrst[infohashHex]
 	if ok {
-		log.Println("ok", infohashHex, t.whrst[infohashHex])
+		// log.Println("ok", infohashHex, t.whrst[infohashHex])
 		return true
-	} else {
-		log.Println("not ok", infohashHex)
 	}
+	// else {
+	// 	log.Println("not ok", infohashHex)
+	// }
 	return ok
 }
 
