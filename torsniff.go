@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -130,7 +131,7 @@ type torsniff struct {
 	blacklist  *blackList
 	dir        string
 	whrst      map[string]*torrent
-	whct       int
+	logtime    time.Time
 }
 
 func (t *torsniff) run() error {
@@ -144,7 +145,7 @@ func (t *torsniff) run() error {
 	dht.run()
 
 	log.Println("running, it may take a few minutes...")
-	log.Println("whdebug log on")
+	// log.Println("whdebug log on")
 
 	for {
 		select {
@@ -185,24 +186,70 @@ func (t *torsniff) work(ac *announcement, tokens chan struct{}) {
 			t.blacklist.add(peerAddr)
 			return
 		}
-		if err := t.saveTorrent(ac.infohashHex, meta); err != nil {
-			return
-		}
+		// if err := t.saveTorrent(ac.infohashHex, meta); err != nil {
+		// 	return
+		// }
 		torrent, err := parseTorrent(meta, ac.infohashHex)
 		if err != nil {
 			return
 		}
 		t.whrst[ac.infohashHex] = torrent
 
-		log.Println(fmt.Sprintf("magnet:?xt=urn:btih:%s", ac.infohashHex))
-		log.Println(torrent)
+		// log.Println(fmt.Sprintf("magnet:?xt=urn:btih:%s", ac.infohashHex))
+		// log.Println(torrent)
+
+	}
+	timenow := time.Now()
+	if timenow.After(t.logtime) {
+		t.logtime = t.logtime.Add(1 * time.Hour)
+
+		// write log file
+		// logdir := path.Add
+		logdir := path.Join(t.dir, "tlog")
+		if err := os.MkdirAll(logdir, 0755); err != nil {
+			return
+		}
+		logfile := path.Join(logdir, timenow.Format("2006-01-02 15:03:04")+".log")
+		f, err := fileutil.TryLockFile(logfile, os.O_WRONLY|os.O_CREATE, 0755)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+
+		type swhrst struct {
+			hash string
+			t    *torrent
+		}
+		var lstswhrst []swhrst
+
+		for k, v := range t.whrst {
+			lstswhrst = append(lstswhrst, swhrst{k, v})
+		}
+
+		sort.Slice(lstswhrst, func(i, j int) bool {
+			return lstswhrst[i].t.times > lstswhrst[j].t.times // 降序
+			// return lstPerson[i].Age < lstPerson[j].Age  // 升序
+		})
+
+		for _, sw := range lstswhrst {
+			_, err = f.Write([]byte(fmt.Sprintf("magnet:?xt=urn:btih:%s", ac.infohashHex)))
+			if err != nil {
+				return
+			}
+
+			_, err = f.Write([]byte(sw.t.String()))
+			if err != nil {
+				return
+			}
+
+		}
 
 	}
 
 }
 
 func (t *torsniff) isTorrentExist(infohashHex string) bool {
-	t.whct += 1
+	// t.whct += 1
 	_, ok := t.whrst[infohashHex]
 	if ok {
 		// log.Println("ok", infohashHex, t.whrst[infohashHex])
@@ -292,7 +339,7 @@ func main() {
 			dir:        absDir,
 			blacklist:  newBlackList(5*time.Minute, 50000),
 			whrst:      whrst,
-			whct:       0,
+			logtime:    time.Now().Add(1 * time.Hour),
 		}
 		return p.run()
 	}

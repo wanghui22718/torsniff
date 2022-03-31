@@ -20,6 +20,9 @@ var seeds = []string{
 	"router.bittorrent.com:6881",
 	"dht.transmissionbt.com:6881",
 	"router.utorrent.com:6881",
+	"tracker.open-internet.nl:6969/announce",
+	"bt.xxx-tracker.com:2710/announce",
+	"tracker.opentrackr.org:1337/announce",
 }
 
 type nodeID []byte
