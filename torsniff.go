@@ -232,7 +232,7 @@ func (t *torsniff) work(ac *announcement, tokens chan struct{}) {
 		})
 
 		for _, sw := range lstswhrst {
-			_, err = f.Write([]byte(fmt.Sprintf("magnet:?xt=urn:btih:%s", ac.infohashHex)))
+			_, err = f.Write([]byte(fmt.Sprintf("magnet:?xt=urn:btih:%s\n", sw.hash)))
 			if err != nil {
 				return
 			}
@@ -346,8 +346,8 @@ func main() {
 
 	root.Flags().StringVarP(&addr, "addr", "a", "", "listen on given address (default all, ipv4 and ipv6)")
 	root.Flags().Uint16VarP(&port, "port", "p", 6881, "listen on given port")
-	root.Flags().IntVarP(&friends, "friends", "f", 5000, "max fiends to make with per second")
-	root.Flags().IntVarP(&peers, "peers", "e", 4000, "max peers to connect to download torrents")
+	root.Flags().IntVarP(&friends, "friends", "f", 5120, "max fiends to make with per second")
+	root.Flags().IntVarP(&peers, "peers", "e", 5120, "max peers to connect to download torrents")
 	root.Flags().DurationVarP(&timeout, "timeout", "t", 3*time.Second, "max time allowed for downloading torrents")
 	root.Flags().StringVarP(&dir, "dir", "d", userHome, "the directory to store the torrents")
 	root.Flags().BoolVarP(&verbose, "verbose", "v", true, "run in verbose mode")
